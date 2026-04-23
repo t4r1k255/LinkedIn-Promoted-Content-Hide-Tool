@@ -1,1 +1,368 @@
+// ==UserScript==
+// @name         LinkedIn — Reklam Gizle
+// @name:tr      LinkedIn — Reklamları Gizle
+// @namespace    li-ad-hide
+// @version      2.1.0
+// @description  LinkedIn feed ve iş arama sayfasındaki sponsorlu/tanıtım içeriklerini, kenar çubuğu reklamlarını ve premium satış kutularını gizler.
+// @match        https://www.linkedin.com/*
+// @grant        none
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
 
+(function () {
+  'use strict';
+
+  // ─── AYAR ────────────────────────────────────────────────────────────────────
+  const SK = 'lia-enabled';
+  function load(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v === '1'; } catch { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, v ? '1' : '0'); } catch {} }
+  let enabled = load(SK, true);
+
+  // ─── ANAHTAR KELİMELER (sadece TR + EN) ──────────────────────────────────────
+  // PROMOTED_EXACT: kısa etiket <p> / <span> içinde tam bu metin olarak geçiyor.
+  // PROMOTED_KW   : actor sub-description gibi alanlarda içinde geçmesi yeterli.
+  const PROMOTED_EXACT = ['tanıtılan içerik', 'promoted'];
+  const PROMOTED_KW    = ['tanıtım', 'sponsorlu'];
+
+  function norm(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  // Tam eşleşme kontrolü — kısa etiket elementleri için
+  function isPromotedExact(text) {
+    const t = norm(text.trim());
+    for (const kw of PROMOTED_EXACT) {
+      if (t === norm(kw)) return true;
+    }
+    return false;
+  }
+
+  // İçerme kontrolü — actor/meta alanları için, 60 karakter üstü atlanır
+  function isPromotedText(text) {
+    const t = norm(text.trim());
+    if (t.length > 60) return false;
+    for (const kw of PROMOTED_EXACT) {
+      if (t.includes(norm(kw))) return true;
+    }
+    for (const kw of PROMOTED_KW) {
+      if (t.includes(norm(kw))) return true;
+    }
+    return false;
+  }
+
+  // ─── SABİT REKLAM SEÇİCİLER ───────────────────────────────────────────────────
+  const STATIC_AD_SELS = [
+    '.ad-banner-container',
+    '[data-ad-banner]',
+    'section[data-ad-banner]',
+    '.right-rail-ad',
+    '[data-view-name="right-rail-ad"]',
+    '[data-view-name*="right_rail_ad"]',
+    '.premium-upsell-module',
+    '.jobs-premium-upsell',
+    '.premium-paywall-profile-prompt',
+    '.premium-hero-default-content',
+    '[data-view-name="jobs-premium-upsell"]',
+    '[data-view-name*="premium-upsell"]',
+    '.reusable-search__side-panel-info-premium',
+    '.learning-recommendation',
+    '[data-view-name="learning-recommendation"]',
+    '[data-view-name*="flagship3_ads"]',
+    '[data-view-name*="job-detail-ad"]',
+  ];
+
+  // ─── data-view-name ile SPONSORED TESPİTİ ────────────────────────────────────
+  const SPONSORED_VIEW_NAMES = [
+    'sponsored-update',
+    'sponsored-video',
+    'sponsored-image',
+    'sponsored-carousel',
+    'sponsored-document',
+    'sponsored-event',
+    'sponsored-text',
+    'ad-featured-update',
+    'ad-single-image',
+    'ad-video',
+    'ad-carousel',
+  ];
+
+  // ─── FEED CONTAINER TESPİTİ ───────────────────────────────────────────────────
+  // En yakın anlamlı üst container'ı bul
+  // role="listitem" — güncel LinkedIn feed yapısında her post bu role'e sahip
+  function getFeedContainer(el) {
+    return (
+      el.closest('[role="listitem"]') ||
+      el.closest('li.occludable-update') ||
+      el.closest('div[data-urn]') ||
+      el.closest('li[data-id]') ||
+      el.closest('div[data-id]') ||
+      el.closest('div.feed-shared-update-v2') ||
+      el.closest('li[class*="feed-item"]') ||
+      el.closest('div[class*="feed-item"]') ||
+      el.closest('article') ||
+      null
+    );
+  }
+
+  // ─── GİZLEME ─────────────────────────────────────────────────────────────────
+  function markHidden(el) {
+    if (!el || el.hasAttribute('data-lia-ad')) return;
+    el.setAttribute('data-lia-ad', '1');
+  }
+
+  // ─── TARAMA ──────────────────────────────────────────────────────────────────
+  function scanAds() {
+    if (!enabled) return;
+
+    // 1. Sabit reklam container'ları
+    for (const sel of STATIC_AD_SELS) {
+      document.querySelectorAll(sel).forEach(el => markHidden(el));
+    }
+
+    // 2. data-view-name ile sponsored gönderi tespiti
+    for (const name of SPONSORED_VIEW_NAMES) {
+      document.querySelectorAll(
+        `[data-view-name="${name}"], [data-view-name*="${name}"]`
+      ).forEach(el => {
+        markHidden(getFeedContainer(el) || el);
+      });
+    }
+
+    // 3. aria-label üzerinden tespiti
+    document.querySelectorAll(
+      '[aria-label*="Promoted"], [aria-label*="Tanıtım"], [aria-label*="Sponsorlu"]'
+    ).forEach(el => {
+      markHidden(getFeedContainer(el) || el);
+    });
+
+    // 4. Feed gönderilerini tara — header/actor alanındaki tüm kısa metinlere bak
+    //    LinkedIn class adlarını sık sık değiştirdiği için hem spesifik hem
+    //    genel selector'lar birlikte kullanılıyor.
+    const actorSelectors = [
+      // Mevcut LinkedIn (2024-2025)
+      '.update-components-actor__sub-description',
+      '.update-components-actor__meta',
+      '.update-components-header__text-wrapper',
+      // Eski ve alternatif yapılar
+      '.feed-shared-actor__sub-description',
+      '.feed-shared-actor__meta',
+      // Class adı ne olursa olsun "actor" içeren sub-description'lar
+      '[class*="actor__sub-description"]',
+      '[class*="actor__meta"]',
+      '[class*="actor-meta"]',
+      // Bazı yapılarda doğrudan span olarak geliyor
+      '.update-components-actor span',
+      '.feed-shared-actor span',
+    ];
+
+    const seen = new Set();
+    for (const sel of actorSelectors) {
+      document.querySelectorAll(sel).forEach(el => {
+        if (seen.has(el)) return;
+        seen.add(el);
+
+        // Elementin kendi metni veya içindeki kısa span'lar kontrol edilir
+        const candidates = el.querySelectorAll('span, div');
+        const textsToCheck = [el.textContent];
+        candidates.forEach(c => {
+          const t = (c.textContent || '').trim();
+          if (t.length > 0 && t.length <= 60) textsToCheck.push(t);
+        });
+
+        for (const text of textsToCheck) {
+          if (isPromotedText(text)) {
+            markHidden(getFeedContainer(el) || el);
+            break;
+          }
+        }
+      });
+    }
+
+    // 5. İş ilanı kartlarındaki "Promoted" etiketleri
+    document.querySelectorAll(
+      'li.jobs-search-results__list-item span, ' +
+      'article.job-search-card span, ' +
+      'li[data-occludable-job-id] span'
+    ).forEach(el => {
+      const text = (el.textContent || '').trim();
+      if (text.length < 3 || text.length > 30) return;
+      if (!isPromotedText(text)) return;
+      const container = el.closest(
+        'li.jobs-search-results__list-item, article.job-search-card, li[data-occludable-job-id]'
+      );
+      if (container) markHidden(container);
+    });
+
+    // 6. ★ ANA YÖNTEM: feed içindeki tüm <p> ve <span> etiketlerini tara.
+    //    LinkedIn'de "Tanıtılan içerik" / "Promoted" etiketi doğrudan bir
+    //    <p componentkey="..."> içinde geliyor, herhangi bir class garantisi yok.
+    //    Tam eşleşme (isPromotedExact) kullanıyoruz — yanlış pozitifi önlemek için.
+    document.querySelectorAll('[role="listitem"] p, [role="listitem"] span').forEach(el => {
+      const text = (el.textContent || '').trim();
+      if (!isPromotedExact(text)) return;
+      // En yakın listitem'i gizle — bu zaten post'un tüm container'ı
+      const container = el.closest('[role="listitem"]');
+      if (container) markHidden(container);
+    });
+
+    updateBadge();
+  }
+
+  function revealAll() {
+    document.querySelectorAll('[data-lia-ad]').forEach(el => el.removeAttribute('data-lia-ad'));
+    updateBadge();
+  }
+
+  // ─── CSS ─────────────────────────────────────────────────────────────────────
+  function injectCSS() {
+    let el = document.getElementById('lia-style');
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'lia-style';
+      document.head.appendChild(el);
+    }
+    el.textContent = `
+      [data-lia-ad] {
+        display: none !important;
+      }
+      #lia-badge {
+        position: fixed;
+        bottom: 18px;
+        right: 14px;
+        z-index: 999999;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: rgba(16,22,28,0.93);
+        border: 1px solid rgba(255,255,255,0.13);
+        border-radius: 999px;
+        padding: 5px 12px 5px 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+        user-select: none;
+        cursor: default;
+      }
+      #lia-badge .lia-count {
+        font-size: 14px;
+        font-weight: 700;
+        color: #e4eaf0;
+        min-width: 16px;
+        text-align: right;
+      }
+      #lia-badge .lia-lbl {
+        font-size: 10px;
+        color: #6e8090;
+        font-weight: 500;
+        margin-right: 2px;
+      }
+      #lia-badge .lia-sep {
+        width: 1px;
+        height: 14px;
+        background: rgba(255,255,255,0.12);
+      }
+      #lia-badge button {
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        cursor: pointer;
+        background: rgba(255,255,255,0.07);
+        color: #9aabb8;
+        font-family: inherit;
+        line-height: 1.4;
+      }
+      #lia-badge button:hover {
+        background: rgba(255,255,255,0.13);
+        color: #c8d8e4;
+      }
+      #lia-badge button.on {
+        background: rgba(220,38,38,0.22);
+        border-color: rgba(220,38,38,0.55);
+        color: #fca5a5;
+      }
+      @media (max-width: 900px) {
+        #lia-badge { bottom: 12px; right: 8px; }
+      }
+    `;
+  }
+
+  // ─── ROZET UI ────────────────────────────────────────────────────────────────
+  let badge, countEl, toggleBtn;
+
+  function ensureBadge() {
+    if (badge && document.body.contains(badge)) return;
+
+    badge = document.createElement('div');
+    badge.id = 'lia-badge';
+
+    countEl = document.createElement('span');
+    countEl.className = 'lia-count';
+    countEl.textContent = '0';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'lia-lbl';
+    lbl.textContent = 'reklam gizli';
+
+    const sep = document.createElement('div');
+    sep.className = 'lia-sep';
+
+    toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = 'Reklam Gizle';
+    toggleBtn.className = enabled ? 'on' : '';
+    toggleBtn.addEventListener('click', () => {
+      enabled = !enabled;
+      save(SK, enabled);
+      toggleBtn.className = enabled ? 'on' : '';
+      if (enabled) { scanAds(); } else { revealAll(); }
+    });
+
+    badge.appendChild(countEl);
+    badge.appendChild(lbl);
+    badge.appendChild(sep);
+    badge.appendChild(toggleBtn);
+    document.body.appendChild(badge);
+  }
+
+  function updateBadge() {
+    if (!countEl) return;
+    countEl.textContent = String(document.querySelectorAll('[data-lia-ad]').length);
+  }
+
+  // ─── OBSERVER & ZAMANLAYICILAR ────────────────────────────────────────────────
+  let mutTimer = null;
+  const observer = new MutationObserver(() => {
+    if (mutTimer) return;
+    mutTimer = setTimeout(() => { mutTimer = null; scanAds(); }, 200);
+  });
+
+  // ─── BAŞLATMA ────────────────────────────────────────────────────────────────
+  function init() {
+    injectCSS();
+    ensureBadge();
+    scanAds();
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // SPA navigasyon (LinkedIn React router)
+    ['pushState', 'replaceState'].forEach(method => {
+      const orig = history[method].bind(history);
+      history[method] = function (...args) {
+        const result = orig(...args);
+        setTimeout(scanAds, 400);
+        setTimeout(scanAds, 1200);
+        return result;
+      };
+    });
+    window.addEventListener('popstate', () => setTimeout(scanAds, 400));
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
