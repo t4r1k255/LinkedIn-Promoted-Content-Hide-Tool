@@ -13,3 +13,11 @@ LinkedIn feed'indeki "Tanıtılan içerik" (sponsored) gönderilerini ve reklam 
 - Kenar çubuğu reklamlarını gizler  
 - Premium satış kutularını gizler
 - Sağ alttaki rozetle açıp kapatılabilir
+
+## ⚠️ Yasal Uyarı
+
+Bu script LinkedIn ile herhangi bir bağlantısı olmayan bağımsız bir topluluk aracıdır. LinkedIn'in [Kullanım Koşulları](https://www.linkedin.com/legal/user-agreement)'na uygun şekilde kullan.
+
+## 📄 Lisans
+
+[MIT License](LICENSE)
