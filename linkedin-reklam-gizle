@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn — Reklam Gizle
 // @name:tr      LinkedIn — Reklamları Gizle
-// @namespace    li-ad-hide
+// @namespace    https://github.com/t4r1k255/LinkedIn-Promoted-Content-Hide-Tool
 // @version      2.1.0
 // @description  LinkedIn feed ve iş arama sayfasındaki sponsorlu/tanıtım içeriklerini, kenar çubuğu reklamlarını ve premium satış kutularını gizler.
 // @match        https://www.linkedin.com/*
