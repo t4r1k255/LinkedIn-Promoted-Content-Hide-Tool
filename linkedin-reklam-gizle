@@ -5,6 +5,7 @@
 // @version      2.1.0
 // @description  LinkedIn feed ve iş arama sayfasındaki sponsorlu/tanıtım içeriklerini, kenar çubuğu reklamlarını ve premium satış kutularını gizler.
 // @match        https://www.linkedin.com/*
+// @author       t4r1k255
 // @grant        none
 // @run-at       document-idle
 // @noframes
